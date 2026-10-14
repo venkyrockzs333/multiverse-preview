@@ -679,13 +679,14 @@ function adapt(dt) {
 /* render on demand: full rate while scrolling / pointer moving / easing, ~30fps for idle ambient motion,
    nothing while the tab or canvas is hidden. Runs on gsap.ticker, so there is a single rAF loop. */
 let animT = 0, awake = true;
-const tweensActive = () => gsap.globalTimeline.getChildren(true, true, false).some((t) => t.isActive());
+// pending (delayed) tweens count too, otherwise the loop sleeps during an intro delay
+const tweensActive = () => gsap.globalTimeline.getChildren(false, true, true).some((t) => !t.paused() && t.progress() < 1 && !(t.scrollTrigger));
 function sleep() {
-  if (!awake) return; awake = false;
+  if (!awake) return; awake = false; window.__mvAsleep = true;
   gsap.ticker.remove(tick); if (lenisRaf) gsap.ticker.remove(lenisRaf);
 }
 function wake() {
-  needsRender = true; lastActive = performance.now();
+  needsRender = true; lastActive = performance.now(); window.__mvAsleep = false;
   if (awake || !window.__mvLoop) return; awake = true; lastTick = performance.now();
   if (lenisRaf) gsap.ticker.add(lenisRaf); gsap.ticker.add(tick);
 }

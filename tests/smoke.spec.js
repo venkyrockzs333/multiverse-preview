@@ -31,11 +31,12 @@ test('no K2, no phone number, verified contact links', async ({ page }) => {
 test('nav anchors resolve to sections', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('./');
+  await page.waitForFunction(() => window.__mvReady, null, { timeout: 20000 }); // smooth-scroll layer loaded
   const hrefs = await page.locator('.nav-links a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
   expect(hrefs.length).toBeGreaterThan(3);
   for (const h of hrefs) expect(await page.locator(h).count(), h).toBe(1);
   await page.locator('.nav-links a[href="#projects"]').click();
-  await expect.poll(async () => page.evaluate(() => Math.abs(document.querySelector('#projects').getBoundingClientRect().top)), { timeout: 8000 }).toBeLessThan(150);
+  await expect.poll(async () => page.evaluate(() => Math.abs(document.querySelector('#projects').getBoundingClientRect().top)), { timeout: 15000 }).toBeLessThan(150);
 });
 
 test('mobile menu opens and closes', async ({ page }) => {
@@ -80,8 +81,11 @@ test('WebGL disabled: page still usable, no uncaught errors', async ({ browser }
 });
 
 test('axe-core: no serious/critical violations', async ({ page }) => {
+  test.setTimeout(60000);
   await page.goto('./'); await page.waitForFunction(() => window.__mvReady || document.documentElement.classList.contains('no-webgl'), null, { timeout: 15000 });
-  await page.waitForTimeout(6000); // let the hero intro finish so axe sees final, not mid-fade, colours
+  // axe must see final colours, not mid-fade: wait until all tweens ended and the loop slept
+  await page.waitForFunction(() => window.__mvAsleep === true || document.documentElement.classList.contains('no-webgl'), null, { timeout: 30000 });
+  await page.waitForTimeout(500);
   const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   const bad = r.violations.filter((v) => ['serious', 'critical'].includes(v.impact));
   console.log('AXE', JSON.stringify(r.violations.map((v) => ({ id: v.id, impact: v.impact, n: v.nodes.length }))));
@@ -90,6 +94,7 @@ test('axe-core: no serious/critical violations', async ({ page }) => {
 
 // Perf regression: once idle, no app rAF work and no WebGL draw calls (true on-demand rendering).
 // Note: ScrollTrigger 3.15 keeps its own empty `_rafBugFix` rAF alive by design; it is counted separately.
+test.describe.configure({ timeout: 60000 });
 test('perf: idle = 0 WebGL draws and 0 app rAF callbacks; wakes on scroll', async ({ page }) => {
   await page.addInitScript(() => {
     window.__raf = 0; window.__rafST = 0; window.__draws = 0;
@@ -103,8 +108,10 @@ test('perf: idle = 0 WebGL draws and 0 app rAF callbacks; wakes on scroll', asyn
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('./');
   await page.waitForFunction(() => window.__mvReady, null, { timeout: 15000 });
-  // wait (max 20 s) until the app loop has gone to sleep: intro tweens end, then gsap.ticker autoSleeps
-  await expect.poll(async () => { const a = await page.evaluate(() => window.__raf); await page.waitForTimeout(1000); return (await page.evaluate(() => window.__raf)) - a; }, { timeout: 20000, intervals: [0] }).toBe(0);
+  // explicit signal from main.js: the render loop detached itself from gsap.ticker
+  await page.waitForFunction(() => window.__mvAsleep === true, null, { timeout: 30000 });
+  // then gsap.ticker autoSleeps after 30 idle frames; poll (generous) until a full 1 s window has no app rAF
+  await expect.poll(async () => { const a = await page.evaluate(() => window.__raf); await page.waitForTimeout(1000); return (await page.evaluate(() => window.__raf)) - a; }, { timeout: 25000, intervals: [0] }).toBe(0);
   const s0 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));
   await page.waitForTimeout(2000);
   const s1 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));
