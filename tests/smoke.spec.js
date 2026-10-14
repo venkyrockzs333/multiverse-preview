@@ -103,7 +103,8 @@ test('perf: idle = 0 WebGL draws and 0 app rAF callbacks; wakes on scroll', asyn
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('./');
   await page.waitForFunction(() => window.__mvReady, null, { timeout: 15000 });
-  await page.waitForTimeout(7000); // hero intro tweens end, then gsap.ticker autoSleeps
+  // wait (max 20 s) until the app loop has gone to sleep: intro tweens end, then gsap.ticker autoSleeps
+  await expect.poll(async () => { const a = await page.evaluate(() => window.__raf); await page.waitForTimeout(1000); return (await page.evaluate(() => window.__raf)) - a; }, { timeout: 20000, intervals: [0] }).toBe(0);
   const s0 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));
   await page.waitForTimeout(2000);
   const s1 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));

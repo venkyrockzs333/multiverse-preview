@@ -498,7 +498,7 @@ function updateSection() {
 /* ------------------------------------------------------------------ scroll */
 let lenis = null, lenisRaf = null;
 gsap.ticker.lagSmoothing(500, 33); // cap catch-up jumps after long frames
-gsap.config({ autoSleep: 60 });      // ticker sleeps ~1s after the last tween once no listeners remain
+gsap.config({ autoSleep: 30 });      // ticker sleeps ~0.5s after the last tween once no listeners remain
 if (!REDUCED && !RECORD) {
   // responsive, not floaty; phones keep native touch scrolling (syncTouch false)
   lenis = new Lenis({ lerp: 0.11, smoothWheel: true, wheelMultiplier: 1, syncTouch: false, autoRaf: false });
