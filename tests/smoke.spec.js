@@ -80,9 +80,48 @@ test('WebGL disabled: page still usable, no uncaught errors', async ({ browser }
 });
 
 test('axe-core: no serious/critical violations', async ({ page }) => {
-  await page.goto('./'); await page.waitForTimeout(2000);
+  await page.goto('./'); await page.waitForFunction(() => window.__mvReady || document.documentElement.classList.contains('no-webgl'), null, { timeout: 15000 });
+  await page.waitForTimeout(6000); // let the hero intro finish so axe sees final, not mid-fade, colours
   const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   const bad = r.violations.filter((v) => ['serious', 'critical'].includes(v.impact));
   console.log('AXE', JSON.stringify(r.violations.map((v) => ({ id: v.id, impact: v.impact, n: v.nodes.length }))));
   expect(bad, JSON.stringify(bad.map((v) => v.id))).toEqual([]);
+});
+
+// Perf regression: once idle, no app rAF work and no WebGL draw calls (true on-demand rendering).
+// Note: ScrollTrigger 3.15 keeps its own empty `_rafBugFix` rAF alive by design; it is counted separately.
+test('perf: idle = 0 WebGL draws and 0 app rAF callbacks; wakes on scroll', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__raf = 0; window.__rafST = 0; window.__draws = 0;
+    const o = window.requestAnimationFrame.bind(window);
+    // app rAF = gsap.ticker (drives render + Lenis) or any other non-ScrollTrigger caller
+    window.requestAnimationFrame = (cb) => { const st = /ScrollTrigger\.min\.js/.test(new Error().stack || ''); return o((t) => { st ? window.__rafST++ : window.__raf++; cb(t); }); };
+    for (const C of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) if (C) for (const m of ['drawElements', 'drawArrays']) {
+      const f = C.prototype[m]; C.prototype[m] = function (...a) { window.__draws++; return f.apply(this, a); };
+    }
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('./');
+  await page.waitForFunction(() => window.__mvReady, null, { timeout: 15000 });
+  await page.waitForTimeout(7000); // hero intro tweens end, then gsap.ticker autoSleeps
+  const s0 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));
+  await page.waitForTimeout(2000);
+  const s1 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws, st: window.__rafST }));
+  console.log('IDLE_2S app_raf', s1.r - s0.r, 'draws', s1.d - s0.d, 'scrolltrigger_noop_raf', s1.st - s0.st);
+  expect(s1.d - s0.d).toBe(0);
+  expect(s1.r - s0.r).toBe(0);
+  await page.mouse.move(700, 450); await page.mouse.wheel(0, 600); await page.waitForTimeout(700);
+  const s2 = await page.evaluate(() => ({ r: window.__raf, d: window.__draws }));
+  console.log('WAKE app_raf', s2.r - s1.r, 'draws', s2.d - s1.d);
+  expect(s2.d - s1.d).toBeGreaterThan(5);
+});
+
+test('3D layer is deferred: three.js not requested before first paint', async ({ page }) => {
+  const order = []; page.on('request', (r) => order.push(r.url()));
+  await page.goto('./');
+  const fcp = await page.evaluate(() => new Promise((ok) => new PerformanceObserver((l) => { const e = l.getEntriesByName('first-contentful-paint')[0]; if (e) ok(e.startTime); }).observe({ type: 'paint', buffered: true })));
+  await page.waitForFunction(() => window.__mvReady, null, { timeout: 15000 });
+  const three = await page.evaluate(() => performance.getEntriesByType('resource').find((r) => /three\.module/.test(r.name)).startTime);
+  console.log('FCP', Math.round(fcp), 'THREE_START', Math.round(three));
+  expect(three).toBeGreaterThan(fcp);
 });

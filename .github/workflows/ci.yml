@@ -14,8 +14,10 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npm run build
+      - name: Résumé must not contain a phone number
+        run: sudo apt-get install -y poppler-utils >/dev/null && npm run check:resume
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - run: npx playwright test  # automated, software-rendered (SwiftShader); not real devices
       - name: Lighthouse desktop
         run: LH_PRESET=desktop npx lhci autorun --config=lighthouserc.cjs
       - name: Lighthouse mobile

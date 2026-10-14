@@ -6,7 +6,8 @@
     "build": "node scripts/build.mjs",
     "serve": "npx http-server dist -p 4173 -s -c-1",
     "test": "playwright test",
-    "lhci": "lhci autorun"
+    "lhci": "lhci autorun",
+    "check:resume": "bash scripts/check-resume.sh"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",

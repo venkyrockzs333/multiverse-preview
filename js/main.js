@@ -496,13 +496,15 @@ function updateSection() {
 }
 
 /* ------------------------------------------------------------------ scroll */
-let lenis = null;
+let lenis = null, lenisRaf = null;
+gsap.ticker.lagSmoothing(500, 33); // cap catch-up jumps after long frames
+gsap.config({ autoSleep: 60 });      // ticker sleeps ~1s after the last tween once no listeners remain
 if (!REDUCED && !RECORD) {
   // responsive, not floaty; phones keep native touch scrolling (syncTouch false)
   lenis = new Lenis({ lerp: 0.11, smoothWheel: true, wheelMultiplier: 1, syncTouch: false, autoRaf: false });
   lenis.on('scroll', ScrollTrigger.update);
-  gsap.ticker.add((time) => lenis.raf(time * 1000)); // the only rAF loop on the page is gsap.ticker
-  gsap.ticker.lagSmoothing(0);
+  lenisRaf = (time) => lenis.raf(time * 1000); // gsap.ticker is the only rAF loop on the page
+  gsap.ticker.add(lenisRaf);
 }
 document.querySelectorAll('[data-scroll]').forEach((a) => a.addEventListener('click', (e) => {
   const target = document.querySelector(a.getAttribute('href')); if (!target) return;
@@ -676,7 +678,18 @@ function adapt(dt) {
 
 /* render on demand: full rate while scrolling / pointer moving / easing, ~30fps for idle ambient motion,
    nothing while the tab or canvas is hidden. Runs on gsap.ticker, so there is a single rAF loop. */
-const clock = new THREE.Clock();
+let animT = 0, awake = true;
+const tweensActive = () => gsap.globalTimeline.getChildren(true, true, false).some((t) => t.isActive());
+function sleep() {
+  if (!awake) return; awake = false;
+  gsap.ticker.remove(tick); if (lenisRaf) gsap.ticker.remove(lenisRaf);
+}
+function wake() {
+  needsRender = true; lastActive = performance.now();
+  if (awake || !window.__mvLoop) return; awake = true; lastTick = performance.now();
+  if (lenisRaf) gsap.ticker.add(lenisRaf); gsap.ticker.add(tick);
+}
+['scroll', 'wheel', 'pointermove', 'pointerdown', 'touchstart', 'keydown', 'resize', 'focusin'].forEach((ev) => addEventListener(ev, wake, { passive: true, capture: true }));
 let lastY = -1, lastW2 = 0, frameNo = 0, canvasVisible = true, needsRender = true, lastTick = 0, prevRendered = false;
 function tick() {
   if (document.hidden || !canvasVisible) { prevRendered = false; return; }
@@ -686,14 +699,18 @@ function tick() {
   if (y !== lastY || innerWidth !== lastW2) { lastY = y; lastW2 = innerWidth; lastActive = now; updateSection(); }
   const easingMouse = Math.abs(mouse.tx - mouse.x) + Math.abs(mouse.ty - mouse.y) > 0.0005;
   const active = needsRender || easingMouse || now - lastActive < 400;
-  if (!active && (frameNo & 1)) { prevRendered = false; return; } // idle: every other frame
+  if (!active) { // truly idle: nothing scrolling, easing or tweening -> detach from the ticker entirely
+    if (!(lenis && lenis.isScrolling) && !tweensActive()) sleep();
+    prevRendered = false; return;
+  }
   needsRender = false;
-  apply(clock.getElapsedTime()); render();
+  animT += Math.min(tickDt, 50) / 1000; // ambient time only advances while awake (no jump after sleep)
+  apply(animT); render();
   if (prevRendered) adapt(tickDt); // only consecutive rendered frames say anything about GPU load
   prevRendered = true;
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) needsRender = true; });
-if ('IntersectionObserver' in window) new IntersectionObserver((en) => { canvasVisible = en[0].isIntersecting; needsRender = true; }).observe(canvas);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+if ('IntersectionObserver' in window) new IntersectionObserver((en) => { canvasVisible = en[0].isIntersecting; if (canvasVisible) wake(); }).observe(canvas);
 
 function resize() {
   renderer.setPixelRatio(pixelRatio);
@@ -730,25 +747,14 @@ function experience() {
   document.querySelectorAll('[data-exp-duration]').forEach((el) => (el.textContent = long));
 }
 
-// hamburger menu
-const burger = document.getElementById('burger'), menu = document.getElementById('menu');
-function setMenu(open) {
-  document.documentElement.classList.toggle('menu-open', open);
-  burger.setAttribute('aria-expanded', String(open));
-  burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
-  if (open) { menu.hidden = false; lenis && lenis.stop(); gsap.fromTo('.menu li', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: REDUCED ? 0 : 0.5, stagger: REDUCED ? 0 : 0.04, ease: 'power3.out' }); menu.querySelector('a').focus(); }
-  else { menu.hidden = true; lenis && lenis.start(); }
-}
-burger.addEventListener('click', () => setMenu(burger.getAttribute('aria-expanded') !== 'true'));
-addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !menu.hidden) { setMenu(false); burger.focus(); }
-  if (e.key === 'Tab' && !menu.hidden) { // keep focus inside the open menu
-    const f = [burger, ...menu.querySelectorAll('a')]; const i = f.indexOf(document.activeElement);
-    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
-    else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
-  }
+// hamburger menu: owned by ui.js (works before/without 3D); here we only add smooth-scroll + motion
+const menu = document.getElementById('menu');
+const setMenu = (o) => window.__ui.setMenu(o);
+addEventListener('menuchange', (e) => {
+  wake();
+  if (e.detail.open) { lenis && lenis.stop(); gsap.fromTo('.menu li', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: REDUCED ? 0 : 0.5, stagger: REDUCED ? 0 : 0.04, ease: 'power3.out' }); }
+  else { lenis && lenis.start(); }
 });
-addEventListener('resize', () => { if (innerWidth > 1180 && !menu.hidden) setMenu(false); });
 
 // "How I approach testing": rail fills and steps light up with scroll
 let stepsTL = null;
@@ -781,11 +787,17 @@ function relayout() {
 /* ------------------------------------------------------------------ boot */
 async function boot() {
   try { await document.fonts.ready; } catch (e) { /* ignore */ }
+  // boot in small slices so no single main-thread task blocks input for long
+  const yieldNow = () => (window.scheduler && scheduler.yield ? scheduler.yield() : new Promise((r) => setTimeout(r, 0)));
   experience();
   resize();
+  // (renderer.compileAsync was measured: +1.3–4 s TBT under SwiftShader, so not used)
+  await yieldNow();
   buildTimeline();
   buildSteps();
+  await yieldNow();
   ScrollTrigger.refresh();
+  await yieldNow();
   buildReveals();
   heroIntro();
   lastH = document.documentElement.scrollHeight;
@@ -826,8 +838,9 @@ async function boot() {
     addEventListener('resize', draw, { passive: true });
     draw();
   } else {
-    gsap.ticker.add(tick);
+    window.__mvLoop = true; gsap.ticker.add(tick);
   }
+  window.__mvReady = true;
   document.documentElement.classList.add('ready');
   window.__ready = true;
 }
