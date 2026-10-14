@@ -57,3 +57,16 @@
 .arch-svg .n { fill: rgba(22, 20, 28, .9); stroke: var(--mv-line-strong); }
 .arch-svg .n.m { stroke: var(--mv-violet-500); }
 .arch figcaption { margin-top: var(--mv-s3); font-size: var(--mv-fs-xs); color: var(--mv-silver-2); letter-spacing: .04em; }
+
+/* THE ARRIVAL (Phase 2): obsidian hero, specimen rendered in the shared WebGL canvas */
+.hero.arrival { color: var(--mv-silver-1); }
+.no-webgl .hero.arrival, html:not(.js) .hero.arrival { background: radial-gradient(80% 60% at 70% 40%, rgba(109, 40, 217, .28), transparent 60%), var(--mv-obsidian); }
+.hero.arrival .label { color: var(--mv-lavender); opacity: 1; }
+.hero.arrival .statement span, .hero.arrival .support { color: var(--mv-silver-2); }
+.hero.arrival .btn.dark-btn { background: var(--mv-violet-600); color: #fff; }
+.hero.arrival .btn.dark-btn:hover { box-shadow: 0 12px 30px -14px rgba(139, 92, 246, .8); }
+.hero.arrival .btn.line-btn { border-color: rgba(236, 234, 242, .38); color: var(--mv-silver-1); }
+.hero.arrival .btn.line-btn:hover { border-color: var(--mv-silver-1); }
+.hero.arrival .btn.text-btn, .hero.arrival .scroll-cue { color: var(--mv-silver-1); }
+/* the bobbing cue stops after 3 cycles so an idle page produces no frames */
+.scroll-cue svg { animation-iteration-count: 3 !important; }

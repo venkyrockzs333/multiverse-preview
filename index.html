@@ -101,7 +101,7 @@
 
   <main id="main" tabindex="-1">
     <!-- 0. HERO (beige) -->
-    <section class="sec hero light" id="home" data-pose="hero" data-side="right" aria-labelledby="hero-title">
+    <section class="sec hero dark arrival" id="home" data-pose="hero" data-side="right" aria-labelledby="hero-title">
       <div class="hero-left block reveal" data-from="left">
         <p class="label">Project Engineer at Wipro</p>
         <h1 class="h-stack hero-name" id="hero-title"><span class="xb">Venkateshwarlu</span><span class="th">Boda</span></h1>
@@ -466,6 +466,11 @@
     let gl = false;
     try { const c = document.createElement('canvas'); gl = !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl'))); } catch (e) { gl = false; }
     const script = (src) => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+    // ScrollTrigger keeps an empty "_rafBugFix" rAF loop alive forever. Park it while the render loop sleeps
+    // (window.__mvAsleep) and resume it on wake, so an idle page schedules no frames at all.
+    const rawRAF = window.requestAnimationFrame.bind(window); let parked = null;
+    window.requestAnimationFrame = (cb) => (cb && cb.name === '_rafBugFix' && window.__mvAsleep ? ((parked = cb), 0) : rawRAF(cb));
+    window.__mvResumeST = () => { if (parked) { const c = parked; parked = null; rawRAF(c); } };
     async function load3D() {
       try {
         await script('vendor/gsap.min.js'); await script('vendor/ScrollTrigger.min.js'); await script('vendor/lenis.min.js');

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createArrival } from './worlds/arrival.js?v=3';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -44,9 +45,17 @@ const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 10
 camera.position.set(0, 0.6, 10);
 camera.lookAt(0, 0.1, 0);
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+/* Environment lighting is NOT built for the first frame: the Arrival needs none. It is generated on the
+   first user interaction (before the laptop can appear). Mobile/LOW gets a cheap hemisphere light instead of PMREM. */
 scene.environmentIntensity = 1.0;
+let envReady = false;
+function ensureEnv() {
+  if (envReady) return; envReady = true;
+  if (LOW) { scene.add(new THREE.HemisphereLight(0xecebf5, 0x2a2438, 1.1)); return; }
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+}
 
 /* post-processing (desktop only) */
 let composer = null, bloom = null, fxaa = null;
@@ -65,7 +74,7 @@ function setupComposer() {
   fxaa = new ShaderPass(FXAAShader); composer.addPass(fxaa); setFxaa();
 }
 function setFxaa() { if (fxaa) fxaa.material.uniforms.resolution.value.set(1 / (innerWidth * pixelRatio), 1 / (innerHeight * pixelRatio)); }
-if (!LOW) setupComposer();
+// bloom composer is created lazily after the first frames (see warmUp)
 
 /* ------------------------------------------------------------------ helpers */
 function canvasTex(w, h, draw) {
@@ -419,13 +428,14 @@ const pMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
 });
 const particles = new THREE.Points(pGeo, pMat); particles.frustumCulled = false; scene.add(particles);
+const arrival = createArrival({ low: LOW }); scene.add(arrival.group);
 
 /* ------------------------------------------------------------------ poses */
 // S is the single animated state; GSAP tweens it, the render loop applies it.
-const BASE = { x: 0, y: 0, z: 0, rx: 0.3, ry: 0, rz: 0, s: 1, lid: 0, split: 0, keys: 0, away: 0, rings: 0, halo: 0, beam: 0, sparkle: 0, dark: 0, violet: 0, sway: 0 };
+const BASE = { arrival: 0, x: 0, y: 0, z: 0, rx: 0.3, ry: 0, rz: 0, s: 1, lid: 0, split: 0, keys: 0, away: 0, rings: 0, halo: 0, beam: 0, sparkle: 0, dark: 0, violet: 0, sway: 0 };
 // fp = footprint width (world units at scale 1) used to keep the model inside the free space beside the text
 const POSES = {
-  hero:       { fp: 3.7, y: -0.15, rx: 0.42, ry: -0.6, rz: 0.05, s: 1.02, lid: 0.68 },
+  hero:       { fp: 3.7, y: -0.15, rx: 0.42, ry: -0.6, rz: 0.05, s: 1.02, lid: 0.68, arrival: 1, dark: 1, sparkle: 0.8 },
   about:      { fp: 3.6, y: -0.15, rx: 0.2, ry: -0.3, rz: 0, s: 1.12, lid: 1 },
   process:    { fp: 4.0, y: -0.3, rx: 0.5, ry: 0.55, rz: -0.06, s: 1.0, lid: 1, keys: 0.85 },
   stats:      { fp: 4.3, y: -0.45, rx: 0.16, ry: TAU - 0.3, rz: 0, s: 0.76, lid: 1, split: 1, keys: 0.3, rings: 1, sparkle: 1, dark: 1, sway: 1 },
@@ -575,7 +585,9 @@ document.addEventListener('focusin', (e) => { const r = reveals.find((x) => x.el
 document.addEventListener('focusout', (e) => { const r = reveals.find((x) => x.el.contains(e.target)); if (r) { r.focus = false; r.last = ''; revealAt(r, scrollY); } });
 function updateReveals() { reveals.forEach((r) => revealAt(r, scrollY)); } // used by ?record stepping only
 function heroIntro() {
-  if (RECORD || REDUCED) return;
+  if (RECORD || REDUCED) { arrival.setIntro(1); return; }
+  const o = { v: 0 };
+  gsap.to(o, { v: 1, duration: 1.6, ease: 'expo.out', delay: 0.1, onUpdate: () => { arrival.setIntro(o.v); needsRender = true; } });
   gsap.from('.hero .h-stack span, .hero .label, .hero .role-line, .hero .statement, .hero .support, .hero .loc, .hero .cta, .scroll-cue', { opacity: 0, y: 40, duration: 1.2, stagger: 0.08, ease: 'power3.out', delay: 0.15 });
 }
 
@@ -593,7 +605,12 @@ function apply(t) {
   // device pose
   device.position.set(S.x + mouse.x * 0.25, S.y - mouse.y * 0.15, S.z);
   device.rotation.set(S.rx + mouse.y * 0.12, S.ry + mouse.x * 0.3, S.rz);
-  device.scale.setScalar(S.s);
+  const devK = 1 - easeOut(Math.min(1, S.arrival * 1.15));
+  device.scale.setScalar(Math.max(0.0001, S.s * devK));
+  device.visible = devK > 0.002;
+  arrival.group.position.set(S.x + mouse.x * 0.2, S.y + 0.25 - mouse.y * 0.1, 0);
+  arrival.update(S.arrival, t, mouse, REDUCED);
+  arrival.group.scale.multiplyScalar(Math.min(1.15, S.s * 0.62));
   inner.position.y = Math.sin(t * 0.9) * 0.06 * idle;
   inner.rotation.y = Math.sin(t * 0.45) * 0.07 * idle;
   inner.rotation.x = Math.sin(t * 0.6 + 1) * 0.025 * idle;
@@ -624,7 +641,7 @@ function apply(t) {
   // shadow: only on light background
   shadow.position.set(device.position.x, device.position.y - 0.75 * k - sp * 1.4 * k, -0.6);
   shadow.scale.set(4.4 * k, 0.7 * k, 1);
-  shadow.material.opacity = 0.32 * (1 - S.dark) * (1 - S.away);
+  shadow.material.opacity = 0.32 * (1 - S.dark) * (1 - S.away) * devK;
 
   for (let i = 0; i < rings.length; i++) {
     const r = rings[i];
@@ -653,7 +670,7 @@ function apply(t) {
   rim.intensity = 0.6 + 3.4 * S.dark; rim2.intensity = 2.2 * S.dark;
   key.intensity = 1.6 - 0.6 * S.dark;
   scene.environmentIntensity = 0.7 - 0.25 * S.dark;
-  if (bloom) bloom.strength = 0.15 + 0.55 * S.dark;
+  if (bloom) bloom.strength = (0.15 + 0.55 * S.dark) * bloomFade;
   const d = S.dark > 0.5;
   if (d !== htmlDark) { htmlDark = d; document.documentElement.style.background = d ? '#151515' : '#EAE6E1'; }
 }
@@ -686,7 +703,7 @@ function sleep() {
   gsap.ticker.remove(tick); if (lenisRaf) gsap.ticker.remove(lenisRaf);
 }
 function wake() {
-  needsRender = true; lastActive = performance.now(); window.__mvAsleep = false;
+  needsRender = true; lastActive = performance.now(); window.__mvAsleep = false; window.__mvResumeST && window.__mvResumeST();
   if (awake || !window.__mvLoop) return; awake = true; lastTick = performance.now();
   if (lenisRaf) gsap.ticker.add(lenisRaf); gsap.ticker.add(tick);
 }
@@ -784,6 +801,25 @@ function relayout() {
     buildTimeline(); ScrollTrigger.refresh(); buildReveals();
   }, 150);
 }
+
+/* ------------------------------------------------------------------ warm-up
+   Everything the Arrival does not need (environment PMREM, bloom chain, laptop shaders) is prepared on the
+   first real user interaction, i.e. before the laptop can scroll into view, and off the page-load path. */
+let warmed = false;
+function warmUp() {
+  if (warmed) return; warmed = true;
+  WARM_EVENTS.forEach((ev) => removeEventListener(ev, warmUp, true));
+  ensureEnv();
+  if (!LOW && !composer) { setupComposer(); }
+  const vis = device.visible; device.visible = true;
+  const done = () => { device.visible = vis; needsRender = true; wake(); };
+  if (renderer.compileAsync) renderer.compileAsync(scene, camera).then(done, done); else { renderer.compile(scene, camera); done(); }
+  if (bloom) { const b = { v: 0 }; gsap.to(b, { v: 1, duration: 0.6, onUpdate: () => { bloomFade = b.v; needsRender = true; } }); }
+}
+let bloomFade = 0;
+const WARM_EVENTS = ['pointerdown', 'wheel', 'scroll', 'keydown', 'touchstart', 'pointermove'];
+WARM_EVENTS.forEach((ev) => addEventListener(ev, warmUp, { passive: true, capture: true }));
+window.__mvWarm = () => warmed;
 
 /* ------------------------------------------------------------------ boot */
 async function boot() {
