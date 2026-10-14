@@ -6,7 +6,7 @@
     "build": "node scripts/build.mjs",
     "serve": "npx http-server dist -p 4173 -s -c-1",
     "test": "playwright test",
-    "lhci": "lhci autorun",
+    "lhci": "lhci autorun --config=lighthouserc.cjs",
     "check:resume": "bash scripts/check-resume.sh"
   },
   "devDependencies": {

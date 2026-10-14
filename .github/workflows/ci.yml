@@ -19,9 +19,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test  # automated, software-rendered (SwiftShader); not real devices
       - name: Lighthouse desktop
-        run: LH_PRESET=desktop npx lhci autorun --config=lighthouserc.cjs
+        run: LH_PRESET=desktop npx --no-install lhci autorun --config=lighthouserc.cjs
       - name: Lighthouse mobile
-        run: LH_PRESET=mobile npx lhci autorun --config=lighthouserc.cjs
+        run: LH_PRESET=mobile npx --no-install lhci autorun --config=lighthouserc.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: reports, path: "test-results\n.lighthouseci" }
