@@ -1,0 +1,17 @@
+{
+  "name": "multiverse-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "npx http-server dist -p 4173 -s -c-1",
+    "test": "playwright test",
+    "lhci": "lhci autorun"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@lhci/cli": "^0.14.0",
+    "@playwright/test": "1.64.0",
+    "http-server": "^14.1.1"
+  }
+}
